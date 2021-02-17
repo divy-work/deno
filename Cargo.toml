@@ -9,7 +9,8 @@ members = [
   "test_util",
   "op_crates/fetch",
   "op_crates/web",
-  "op_crates/crypto"
+  "op_crates/crypto",
+  "op_crates/webusb"
 ]
 exclude = [
   "std/hash/_wasm"
