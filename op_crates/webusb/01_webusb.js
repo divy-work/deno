@@ -5,7 +5,7 @@
   const core = window.Deno.core;
   
   function getDevices() {
-      core.jsonOpSync("op_webusb_get_devices", {});
+      return core.jsonOpSync("op_webusb_get_devices", {});
   }
 
   window.usb = {

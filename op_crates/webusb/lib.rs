@@ -9,6 +9,7 @@ use deno_core::JsRuntime;
 use deno_core::OpState;
 use deno_core::ZeroCopyBuf;
 use serde::Serialize;
+use rusb::UsbContext;
 
 pub use rusb; // Re-export rusb
 
@@ -24,17 +25,19 @@ pub fn init(isolate: &mut JsRuntime) {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UsbConfiguration {
   // Index of String Descriptor describing this configuration.
-  configuration_name: u8,
+  configuration_name: Option<u8>,
   // The configuration number. Should corresspond to bConfigurationValue (https://www.beyondlogic.org/usbnutshell/usb5.shtml#ConfigurationDescriptors)
   configuration_value: u8,
   // TODO: implement USBInterfaces
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UsbDevice {
-  configuration: UsbConfiguration,
+  configuration: Option<UsbConfiguration>,
   // TODO: Implement configurations using https://docs.rs/rusb/0.7.0/rusb/struct.Device.html#method.config_descriptor
   device_class: u8,
   device_subclass: u8,
@@ -65,14 +68,17 @@ pub fn op_webusb_get_devices(
   let mut usbdevices: Vec<UsbDevice> = vec![];
 
   for device in devices.iter() {
-    let config_descriptor = device.active_config_descriptor().unwrap();
+    let config_descriptor = device.active_config_descriptor();
     let device_descriptor = device.device_descriptor().unwrap();
     let device_version = device_descriptor.device_version();
     let usb_version = device_descriptor.usb_version();
 
-    let configuration = UsbConfiguration {
-      configuration_name: config_descriptor.description_string_index().unwrap(),
-      configuration_value: config_descriptor.number(),
+    let configuration = match config_descriptor {
+      Ok(config_descriptor) => Some(UsbConfiguration {
+        configuration_name:  config_descriptor.description_string_index(),
+        configuration_value: config_descriptor.number(),
+      }),
+      Err(_) => None,
     };
 
     usbdevices.push(UsbDevice {
