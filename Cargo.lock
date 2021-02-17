@@ -541,6 +541,7 @@ dependencies = [
  "deno_fetch",
  "deno_web",
  "deno_websocket",
+ "deno_webusb",
  "dlopen",
  "encoding_rs",
  "env_logger",
@@ -601,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "deno_webusb"
-version = "0.13.0"
+version = "0.1.0"
 dependencies = [
  "deno_core",
  "rusb",

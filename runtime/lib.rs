@@ -11,6 +11,7 @@ pub use deno_crypto;
 pub use deno_fetch;
 pub use deno_web;
 pub use deno_websocket;
+pub use deno_webusb;
 
 pub mod colors;
 pub mod errors;

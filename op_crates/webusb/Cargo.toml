@@ -2,7 +2,7 @@
 
 [package]
 name = "deno_webusb"
-version = "0.13.0"
+version = "0.1.0"
 edition = "2018"
 description = "The WebUSB API"
 authors = ["the Deno authors"]
