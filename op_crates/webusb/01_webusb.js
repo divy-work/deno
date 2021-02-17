@@ -4,6 +4,18 @@
 ((window) => {
   const core = window.Deno.core;
   
+  class UsbDevice {
+    constructor(device) {
+      this.device = device;
+      this.opened = false;
+    }
+
+    async claimInterface(interfaceNumber) {
+      if(!this.opened) throw new Error("The device must be opened first.");
+
+      return core.jsonOpSync("op_webusb_claim_interface", interfaceNumber);
+    }
+  }
   function getDevices() {
       return core.jsonOpSync("op_webusb_get_devices", {});
   }
