@@ -53,6 +53,7 @@ pub struct UsbDevice {
   usb_version_major: u8,
   usb_version_minor: u8,
   usb_version_subminor: u8,
+  vendor_id: u16,
 }
 
 pub fn op_webusb_get_devices(
@@ -86,6 +87,7 @@ pub fn op_webusb_get_devices(
       usb_version_major: usb_version.major(),
       usb_version_minor: usb_version.minor(),
       usb_version_subminor: usb_version.sub_minor(),
+      vendor_id: device_descriptor.vendor_id(),
     });
   }
 
