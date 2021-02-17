@@ -605,6 +605,7 @@ version = "0.13.0"
 dependencies = [
  "deno_core",
  "rusb",
+ "serde",
 ]
 
 [[package]]
