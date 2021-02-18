@@ -6,10 +6,12 @@ use deno_core::error::AnyError;
 use deno_core::serde_json::json;
 use deno_core::serde_json::Value;
 use deno_core::JsRuntime;
+use deno_core::Resource;
 use deno_core::OpState;
 use deno_core::ZeroCopyBuf;
-use serde::Serialize;
-use rusb::UsbContext;
+use serde::{Serialize, Deserialize};
+use rusb::{DeviceHandle, UsbContext};
+use std::borrow::Cow;
 
 pub use rusb; // Re-export rusb
 
@@ -24,7 +26,7 @@ pub fn init(isolate: &mut JsRuntime) {
   }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Copy, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UsbConfiguration {
   // Index of String Descriptor describing this configuration.
@@ -34,7 +36,7 @@ pub struct UsbConfiguration {
   // TODO: implement USBInterfaces
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Copy, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UsbDevice {
   configuration: Option<UsbConfiguration>,
@@ -59,14 +61,33 @@ pub struct UsbDevice {
   vendor_id: u16,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Args {
+  rid: u32,
+}
+
+impl Resource for UsbDevice {
+  fn name(&self) -> Cow<str> {
+    "usbDevice".into()
+  }
+}
+
+
 pub fn op_webusb_get_devices(
-  _state: &mut OpState,
+  state: &mut OpState,
   _args: Value,
   _zero_copy: &mut [ZeroCopyBuf],
 ) -> Result<Value, AnyError> {
   let devices = rusb::devices().unwrap();
-  let mut usbdevices: Vec<UsbDevice> = vec![];
+  
+  #[derive(Serialize)]
+  struct Device {
+    usbdevice: UsbDevice,
+    rid: u32,
+  }
 
+  let mut usbdevices: Vec<Device> = vec![];
   for device in devices.iter() {
     let config_descriptor = device.active_config_descriptor();
     let device_descriptor = device.device_descriptor().unwrap();
@@ -80,8 +101,8 @@ pub fn op_webusb_get_devices(
       }),
       Err(_) => None,
     };
-
-    usbdevices.push(UsbDevice {
+    
+    let usbdevice = UsbDevice {
       configuration,
       device_class: device_descriptor.class_code(),
       device_subclass: device_descriptor.sub_class_code(),
@@ -94,7 +115,9 @@ pub fn op_webusb_get_devices(
       usb_version_minor: usb_version.minor(),
       usb_version_subminor: usb_version.sub_minor(),
       vendor_id: device_descriptor.vendor_id(),
-    });
+    };
+    let rid = state.resource_table.add(usbdevice);
+    usbdevices.push(Device { usbdevice, rid });
   }
 
   Ok(json!(usbdevices))

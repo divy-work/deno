@@ -15,6 +15,11 @@
 
       return core.jsonOpSync("op_webusb_claim_interface", interfaceNumber);
     }
+
+    async open() {
+      if(this.opened) throw new Error("The device is already opened.");
+      return core.jsonOpSync("op_webusb_open_device", {})
+    }
   }
   function getDevices() {
       return core.jsonOpSync("op_webusb_get_devices", {});
