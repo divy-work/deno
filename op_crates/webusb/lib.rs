@@ -114,7 +114,7 @@ pub fn op_webusb_open_device(
   args: Value,
   _zero_copy: &mut [ZeroCopyBuf],
 ) -> Result<Value, AnyError> {
-  let args: ClaimInterfaceArgs = serde_json::from_value(args)?;
+  let args: OpenArgs = serde_json::from_value(args)?;
   let rid = args.rid;
 
   let resource = state

@@ -39,7 +39,7 @@
 
   function getDevices() {
       let devices = core.jsonOpSync("op_webusb_get_devices", {});
-      return devices.map(({ rid, device }) => new UsbDevice(device, rid));
+      return devices.map(({ rid, usbdevice }) => new UsbDevice(usbdevice, rid));
   }
 
   window.usb = {
