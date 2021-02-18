@@ -2,20 +2,25 @@
 
 // #![deny(warnings)]
 
-use deno_core::error::AnyError;
-use deno_core::serde_json::json;
-use deno_core::serde_json;
-use deno_core::serde_json::Value;
-use deno_core::JsRuntime;
-use deno_core::Resource;
-use deno_core::OpState;
-use deno_core::AsyncRefCell;
-use deno_core::ZeroCopyBuf;
-use serde::{Serialize, Deserialize};
-use rusb::{DeviceHandle, UsbContext, Device, GlobalContext};
-use std::borrow::Cow;
 use deno_core::error::bad_resource_id;
+use deno_core::error::AnyError;
+use deno_core::serde_json;
+use deno_core::serde_json::json;
+use deno_core::serde_json::Value;
+use deno_core::AsyncRefCell;
+use deno_core::JsRuntime;
+use deno_core::OpState;
+use deno_core::RcRef;
+use deno_core::Resource;
+use deno_core::ZeroCopyBuf;
+use deno_core::BufVec;
+use rusb::{Device, DeviceHandle, GlobalContext, UsbContext};
+use serde::{Deserialize, Serialize};
+use std::borrow::BorrowMut;
+use std::borrow::Cow;
+use std::cell::RefCell;
 use std::rc::Rc;
+
 pub use rusb; // Re-export rusb
 
 /// Execute this crates' JS source files.
@@ -66,12 +71,29 @@ pub struct UsbDevice {
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Args {
+struct OpenArgs {
   rid: u32,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaimInterfaceArgs {
+  rid: u32,
+  interface_number: u8,
+}
+
 pub struct UsbResource {
-  device: AsyncRefCell<Device<GlobalContext>>,
+  device: Device<GlobalContext>,
+}
+
+pub struct UsbHandleResource {
+  handle: AsyncRefCell<DeviceHandle<GlobalContext>>,
+}
+
+impl Resource for UsbHandleResource {
+  fn name(&self) -> Cow<str> {
+    "usbDeviceHandle".into()
+  }
 }
 
 impl Resource for UsbResource {
@@ -80,20 +102,44 @@ impl Resource for UsbResource {
   }
 }
 
-
 pub fn op_webusb_open_device(
   state: &mut OpState,
   args: Value,
   _zero_copy: &mut [ZeroCopyBuf],
 ) -> Result<Value, AnyError> {
-  let args: Args = serde_json::from_value(args)?;
+  let args: ClaimInterfaceArgs = serde_json::from_value(args)?;
   let rid = args.rid;
 
   let resource = state
     .resource_table
     .get::<UsbResource>(rid)
     .ok_or_else(bad_resource_id)?;
-    Ok(json!({}))
+
+  let handle = resource.device.open()?;
+  let rid = state.resource_table.add(UsbHandleResource {
+    handle: AsyncRefCell::new(handle),
+  });
+  Ok(json!({ "rid": rid }))
+}
+
+pub async fn op_webusb_claim_interface(
+  state: Rc<RefCell<OpState>>,
+  args: Value,
+  _zero_copy: BufVec,
+) -> Result<Value, AnyError> {
+  let args: ClaimInterfaceArgs = serde_json::from_value(args)?;
+  let rid = args.rid;
+  let interface_number = args.interface_number;
+
+  let resource = state
+    .borrow()
+    .resource_table
+    .get::<UsbHandleResource>(rid)
+    .ok_or_else(bad_resource_id)?;
+
+  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  handle.claim_interface(interface_number)?;
+  Ok(json!({}))
 }
 
 pub fn op_webusb_get_devices(
@@ -102,7 +148,7 @@ pub fn op_webusb_get_devices(
   _zero_copy: &mut [ZeroCopyBuf],
 ) -> Result<Value, AnyError> {
   let devices = rusb::devices().unwrap();
-  
+
   #[derive(Serialize)]
   struct Device {
     usbdevice: UsbDevice,
@@ -118,12 +164,12 @@ pub fn op_webusb_get_devices(
 
     let configuration = match config_descriptor {
       Ok(config_descriptor) => Some(UsbConfiguration {
-        configuration_name:  config_descriptor.description_string_index(),
+        configuration_name: config_descriptor.description_string_index(),
         configuration_value: config_descriptor.number(),
       }),
       Err(_) => None,
     };
-    
+
     let usbdevice = UsbDevice {
       configuration,
       device_class: device_descriptor.class_code(),
@@ -138,7 +184,7 @@ pub fn op_webusb_get_devices(
       usb_version_subminor: usb_version.sub_minor(),
       vendor_id: device_descriptor.vendor_id(),
     };
-    let rid = state.resource_table.add(UsbResource { device: AsyncRefCell::new(device) });
+    let rid = state.resource_table.add(UsbResource { device });
     usbdevices.push(Device { usbdevice, rid });
   }
 
