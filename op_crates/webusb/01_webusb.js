@@ -5,8 +5,10 @@
   const core = window.Deno.core;
   
   class UsbDevice {
-    constructor(device) {
+    #rid
+    constructor(device, rid) {
       this.device = device;
+      this.#rid = rid;
       this.opened = false;
     }
 
@@ -18,7 +20,7 @@
 
     async open() {
       if(this.opened) throw new Error("The device is already opened.");
-      return core.jsonOpSync("op_webusb_open_device", {})
+      return core.jsonOpSync("op_webusb_open_device", { rid: this.#rid })
     }
   }
   function getDevices() {

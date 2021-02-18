@@ -4,15 +4,18 @@
 
 use deno_core::error::AnyError;
 use deno_core::serde_json::json;
+use deno_core::serde_json;
 use deno_core::serde_json::Value;
 use deno_core::JsRuntime;
 use deno_core::Resource;
 use deno_core::OpState;
+use deno_core::AsyncRefCell;
 use deno_core::ZeroCopyBuf;
 use serde::{Serialize, Deserialize};
-use rusb::{DeviceHandle, UsbContext};
+use rusb::{DeviceHandle, UsbContext, Device, GlobalContext};
 use std::borrow::Cow;
-
+use deno_core::error::bad_resource_id;
+use std::rc::Rc;
 pub use rusb; // Re-export rusb
 
 /// Execute this crates' JS source files.
@@ -67,12 +70,31 @@ struct Args {
   rid: u32,
 }
 
-impl Resource for UsbDevice {
+pub struct UsbResource {
+  device: AsyncRefCell<Device<GlobalContext>>,
+}
+
+impl Resource for UsbResource {
   fn name(&self) -> Cow<str> {
     "usbDevice".into()
   }
 }
 
+
+pub fn op_webusb_open_device(
+  state: &mut OpState,
+  args: Value,
+  _zero_copy: &mut [ZeroCopyBuf],
+) -> Result<Value, AnyError> {
+  let args: Args = serde_json::from_value(args)?;
+  let rid = args.rid;
+
+  let resource = state
+    .resource_table
+    .get::<UsbResource>(rid)
+    .ok_or_else(bad_resource_id)?;
+    Ok(json!({}))
+}
 
 pub fn op_webusb_get_devices(
   state: &mut OpState,
@@ -116,7 +138,7 @@ pub fn op_webusb_get_devices(
       usb_version_subminor: usb_version.sub_minor(),
       vendor_id: device_descriptor.vendor_id(),
     };
-    let rid = state.resource_table.add(usbdevice);
+    let rid = state.resource_table.add(UsbResource { device: AsyncRefCell::new(device) });
     usbdevices.push(Device { usbdevice, rid });
   }
 
