@@ -15,7 +15,12 @@
 
     async claimInterface(interfaceNumber) {
       if(!this.opened) throw new Error("The device must be opened first.");
-      return core.jsonOpSync("op_webusb_claim_interface", { rid: this.#deviceHandleRid, interfaceNumber });
+      return core.jsonOpAsync("op_webusb_claim_interface", { rid: this.#deviceHandleRid, interfaceNumber });
+    }
+
+    async selectConfiguration(configurationValue) {
+      if(!this.opened) throw new Error("The device must be opened first.");
+      return core.jsonOpAsync("op_webusb_select_configuration", { rid: this.#deviceHandleRid, configurationValue });
     }
 
     async open() {
@@ -31,8 +36,10 @@
       this.opened = false;
     }
   }
+
   function getDevices() {
-      return core.jsonOpSync("op_webusb_get_devices", {});
+      let devices = core.jsonOpSync("op_webusb_get_devices", {});
+      return devices.map(({ rid, device }) => new UsbDevice(device, rid));
   }
 
   window.usb = {

@@ -82,6 +82,13 @@ struct ClaimInterfaceArgs {
   interface_number: u8,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectConfigurationArgs {
+  rid: u32,
+  configuration_value: u8,
+}
+
 pub struct UsbResource {
   device: Device<GlobalContext>,
 }
@@ -120,6 +127,26 @@ pub fn op_webusb_open_device(
     handle: AsyncRefCell::new(handle),
   });
   Ok(json!({ "rid": rid }))
+}
+
+pub async fn op_webusb_select_configuration(
+  state: Rc<RefCell<OpState>>,
+  args: Value,
+  _zero_copy: BufVec,
+) -> Result<Value, AnyError> {
+  let args: SelectConfigurationArgs = serde_json::from_value(args)?;
+  let rid = args.rid;
+  let configuration_value = args.configuration_value;
+
+  let resource = state
+    .borrow()
+    .resource_table
+    .get::<UsbHandleResource>(rid)
+    .ok_or_else(bad_resource_id)?;
+
+  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  handle.set_active_configuration(configuration_value)?;
+  Ok(json!({}))
 }
 
 pub async fn op_webusb_claim_interface(
