@@ -33,6 +33,11 @@
       return core.jsonOpAsync("op_webusb_select_alternate_interface", { rid: this.#deviceHandleRid, interfaceNumber, alternateSetting });
     }
 
+    async reset() {
+      if(!this.opened) throw new Error("The device must be opened first.");
+      return core.jsonOpAsync("op_webusb_reset", { rid: this.#deviceHandleRid });
+    }
+
     async open() {
       if(this.opened) throw new Error("The device is already opened.");
       let { rid } = core.jsonOpSync("op_webusb_open_device", { rid: this.#rid });

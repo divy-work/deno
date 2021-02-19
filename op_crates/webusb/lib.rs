@@ -136,6 +136,27 @@ pub fn op_webusb_open_device(
   Ok(json!({ "rid": rid }))
 }
 
+pub async fn op_webusb_reset(
+  state: Rc<RefCell<OpState>>,
+  args: Value,
+  _zero_copy: BufVec,
+) -> Result<Value, AnyError> {
+  // Note: Reusing `OpenArgs` struct here. The rid is for the device handle.
+  let args: OpenArgs = serde_json::from_value(args)?;
+  let rid = args.rid;
+
+  let resource = state
+    .borrow()
+    .resource_table
+    .get::<UsbHandleResource>(rid)
+    .ok_or_else(bad_resource_id)?;
+
+  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  handle.reset()?;
+  Ok(json!({}))
+}
+
+
 pub async fn op_webusb_select_configuration(
   state: Rc<RefCell<OpState>>,
   args: Value,
