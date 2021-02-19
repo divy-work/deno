@@ -47,7 +47,7 @@ pub struct UsbConfiguration {
   // TODO: implement USBInterfaces
 }
 
-#[derive(Serialize, Copy, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UsbDevice {
   configuration: Option<UsbConfiguration>,
@@ -58,14 +58,10 @@ pub struct UsbDevice {
   device_version_major: u8,
   device_version_minor: u8,
   device_version_subminor: u8,
-  // Need to open USB to get manufacturer_name https://docs.rs/rusb/0.7.0/rusb/struct.DeviceHandle.html#method.read_manufacturer_string_ascii
-  // manufacturer_name: String,
+  manufacturer_name: String,
   product_id: u16,
-  // Need to open USB to get product_name https://docs.rs/rusb/0.7.0/rusb/struct.DeviceDescriptor.html#method.product_string_index
-  // product_name: String,
-
-  // Need to open USB to get serial_number https://docs.rs/rusb/0.7.0/rusb/struct.DeviceDescriptor.html#method.serial_number_string_index
-  // serial_number: String,
+  product_name: String,
+  serial_number: String,
   usb_version_major: u8,
   usb_version_minor: u8,
   usb_version_subminor: u8,
@@ -101,6 +97,7 @@ struct SelectAlternateInterfaceArgs {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
 enum Direction {
   In,
   Out,
@@ -190,6 +187,7 @@ pub async fn op_webusb_close_device(
     .ok_or_else(bad_resource_id)?;
 
   let handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  // TODO(@littledivy): use `drop(handle);` instead?
   // rusb does not provide a close method instead it implements it as a Drop trait.
   unsafe {
     libusb_close(handle.as_raw());
@@ -226,7 +224,7 @@ pub async fn op_webusb_clear_halt(
   let rid = args.rid;
   let direction: Direction = args.direction;
 
-  let mut endpoint = args.endpoint;
+  let mut endpoint = args.endpoint_number;
 
   match direction {
     Direction::In => endpoint |= EP_DIR_IN,
@@ -333,6 +331,10 @@ pub fn op_webusb_get_devices(
       Err(_) => None,
     };
 
+    let handle = device.open()?;
+    let manufacturer_name = handle.read_manufacturer_string_ascii(&device_descriptor)?;
+    let product_name = handle.read_product_string_ascii(&device_descriptor)?;
+    let serial_number = handle.read_serial_number_string_ascii(&device_descriptor)?;
     let usbdevice = UsbDevice {
       configuration,
       device_class: device_descriptor.class_code(),
@@ -346,7 +348,14 @@ pub fn op_webusb_get_devices(
       usb_version_minor: usb_version.minor(),
       usb_version_subminor: usb_version.sub_minor(),
       vendor_id: device_descriptor.vendor_id(),
+      manufacturer_name,
+      product_name,
+      serial_number,
     };
+
+    // Explicitly close the device.
+    drop(handle);
+
     let rid = state.resource_table.add(UsbResource { device });
     usbdevices.push(Device { usbdevice, rid });
   }
