@@ -45,6 +45,14 @@
       );
     }
 
+    async clearHalt(direction, endpointNumber) {
+      if (!this.opened) throw new Error("The device must be opened first.");
+      return core.jsonOpAsync(
+        "op_webusb_clear_halt",
+        { rid: this.#deviceHandleRid, direction, endpointNumber },
+      );
+    }
+
     async reset() {
       if (!this.opened) throw new Error("The device must be opened first.");
       return core.jsonOpAsync(

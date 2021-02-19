@@ -14,6 +14,7 @@ use deno_core::OpState;
 use deno_core::RcRef;
 use deno_core::Resource;
 use deno_core::ZeroCopyBuf;
+use libusb1_sys::libusb_close;
 use rusb::{Device, DeviceHandle, GlobalContext};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -21,6 +22,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 pub use rusb; // Re-export rusb
+
+static EP_DIR_IN: u8 = 0x80;
+static EP_DIR_OUT: u8 = 0x0;
 
 /// Execute this crates' JS source files.
 pub fn init(isolate: &mut JsRuntime) {
@@ -94,6 +98,20 @@ struct SelectAlternateInterfaceArgs {
   rid: u32,
   interface_number: u8,
   alternate_setting: u8,
+}
+
+#[derive(Deserialize)]
+enum Direction {
+  In,
+  Out,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClearHaltArgs {
+  rid: u32,
+  direction: Direction,
+  endpoint_number: u8,
 }
 
 pub struct UsbResource {
@@ -171,8 +189,11 @@ pub async fn op_webusb_close_device(
     .get::<UsbHandleResource>(rid)
     .ok_or_else(bad_resource_id)?;
 
-  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
-  handle.close()?;
+  let handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  // rusb does not provide a close method instead it implements it as a Drop trait.
+  unsafe {
+    libusb_close(handle.as_raw());
+  }
   Ok(json!({}))
 }
 
@@ -193,6 +214,33 @@ pub async fn op_webusb_select_configuration(
 
   let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
   handle.set_active_configuration(configuration_value)?;
+  Ok(json!({}))
+}
+
+pub async fn op_webusb_clear_halt(
+  state: Rc<RefCell<OpState>>,
+  args: Value,
+  _zero_copy: BufVec,
+) -> Result<Value, AnyError> {
+  let args: ClearHaltArgs = serde_json::from_value(args)?;
+  let rid = args.rid;
+  let direction: Direction = args.direction;
+
+  let mut endpoint = args.endpoint;
+
+  match direction {
+    Direction::In => endpoint |= EP_DIR_IN,
+    Direction::Out => endpoint |= EP_DIR_OUT,
+  };
+
+  let resource = state
+    .borrow()
+    .resource_table
+    .get::<UsbHandleResource>(rid)
+    .ok_or_else(bad_resource_id)?;
+
+  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  handle.clear_halt(endpoint)?;
   Ok(json!({}))
 }
 

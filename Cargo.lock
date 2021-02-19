@@ -605,6 +605,7 @@ name = "deno_webusb"
 version = "0.1.0"
 dependencies = [
  "deno_core",
+ "libusb1-sys",
  "rusb",
  "serde",
 ]
