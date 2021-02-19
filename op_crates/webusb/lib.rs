@@ -8,12 +8,12 @@ use deno_core::serde_json;
 use deno_core::serde_json::json;
 use deno_core::serde_json::Value;
 use deno_core::AsyncRefCell;
+use deno_core::BufVec;
 use deno_core::JsRuntime;
 use deno_core::OpState;
 use deno_core::RcRef;
 use deno_core::Resource;
 use deno_core::ZeroCopyBuf;
-use deno_core::BufVec;
 use rusb::{Device, DeviceHandle, GlobalContext};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -156,6 +156,25 @@ pub async fn op_webusb_reset(
   Ok(json!({}))
 }
 
+pub async fn op_webusb_close_device(
+  state: Rc<RefCell<OpState>>,
+  args: Value,
+  _zero_copy: BufVec,
+) -> Result<Value, AnyError> {
+  // Note: Reusing `OpenArgs` struct here. The rid is for the device handle.
+  let args: OpenArgs = serde_json::from_value(args)?;
+  let rid = args.rid;
+
+  let resource = state
+    .borrow()
+    .resource_table
+    .get::<UsbHandleResource>(rid)
+    .ok_or_else(bad_resource_id)?;
+
+  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  handle.close()?;
+  Ok(json!({}))
+}
 
 pub async fn op_webusb_select_configuration(
   state: Rc<RefCell<OpState>>,

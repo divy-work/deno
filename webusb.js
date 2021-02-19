@@ -1,1 +1,1 @@
-console.log(window.usb.getDevices())
+console.log(window.usb.getDevices());
