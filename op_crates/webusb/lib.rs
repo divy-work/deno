@@ -14,9 +14,8 @@ use deno_core::RcRef;
 use deno_core::Resource;
 use deno_core::ZeroCopyBuf;
 use deno_core::BufVec;
-use rusb::{Device, DeviceHandle, GlobalContext, UsbContext};
+use rusb::{Device, DeviceHandle, GlobalContext};
 use serde::{Deserialize, Serialize};
-use std::borrow::BorrowMut;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -146,6 +145,26 @@ pub async fn op_webusb_select_configuration(
 
   let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
   handle.set_active_configuration(configuration_value)?;
+  Ok(json!({}))
+}
+
+pub async fn op_webusb_release_interface(
+  state: Rc<RefCell<OpState>>,
+  args: Value,
+  _zero_copy: BufVec,
+) -> Result<Value, AnyError> {
+  let args: ClaimInterfaceArgs = serde_json::from_value(args)?;
+  let rid = args.rid;
+  let interface_number = args.interface_number;
+
+  let resource = state
+    .borrow()
+    .resource_table
+    .get::<UsbHandleResource>(rid)
+    .ok_or_else(bad_resource_id)?;
+
+  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  handle.release_interface(interface_number)?;
   Ok(json!({}))
 }
 
