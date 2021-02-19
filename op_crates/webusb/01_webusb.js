@@ -28,9 +28,9 @@
       return core.jsonOpAsync("op_webusb_select_configuration", { rid: this.#deviceHandleRid, configurationValue });
     }
 
-    async selectAlternateSetting(interfaceNumber, alternateSetting) {
+    async selectAlternateInterface(interfaceNumber, alternateSetting) {
       if(!this.opened) throw new Error("The device must be opened first.");
-      return core.jsonOpAsync("op_webusb_select_alternate_setting", { rid: this.#deviceHandleRid, interfaceNumber, alternateSetting });
+      return core.jsonOpAsync("op_webusb_select_alternate_interface", { rid: this.#deviceHandleRid, interfaceNumber, alternateSetting });
     }
 
     async open() {
