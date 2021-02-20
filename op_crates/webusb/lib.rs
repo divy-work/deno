@@ -131,21 +131,22 @@ impl Resource for UsbResource {
   }
 }
 
-pub fn op_webusb_open_device(
-  state: &mut OpState,
+pub async fn op_webusb_open_device(
+  state: Rc<RefCell<OpState>>,
   args: Value,
-  _zero_copy: &mut [ZeroCopyBuf],
+  _zero_copy: BufVec,
 ) -> Result<Value, AnyError> {
   let args: OpenArgs = serde_json::from_value(args)?;
   let rid = args.rid;
 
   let resource = state
+    .borrow()
     .resource_table
     .get::<UsbResource>(rid)
     .ok_or_else(bad_resource_id)?;
 
   let handle = resource.device.open()?;
-  let rid = state.resource_table.add(UsbHandleResource {
+  let rid = state.borrow_mut().resource_table.add(UsbHandleResource {
     handle: AsyncRefCell::new(handle),
   });
   Ok(json!({ "rid": rid }))
@@ -303,10 +304,10 @@ pub async fn op_webusb_claim_interface(
   Ok(json!({}))
 }
 
-pub fn op_webusb_get_devices(
-  state: &mut OpState,
+pub async fn op_webusb_get_devices(
+  state: Rc<RefCell<OpState>>,
   _args: Value,
-  _zero_copy: &mut [ZeroCopyBuf],
+  _zero_copy: BufVec,
 ) -> Result<Value, AnyError> {
   let devices = rusb::devices().unwrap();
 
@@ -317,6 +318,7 @@ pub fn op_webusb_get_devices(
   }
 
   let mut usbdevices: Vec<Device> = vec![];
+  let mut state = state.borrow_mut();
   for device in devices.iter() {
     let config_descriptor = device.active_config_descriptor();
     let device_descriptor = device.device_descriptor().unwrap();

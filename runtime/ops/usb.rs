@@ -10,8 +10,8 @@ use deno_webusb::op_webusb_select_alternate_interface;
 use deno_webusb::op_webusb_select_configuration;
 
 pub fn init(rt: &mut deno_core::JsRuntime) {
-  super::reg_json_sync(rt, "op_webusb_get_devices", op_webusb_get_devices);
-  super::reg_json_sync(rt, "op_webusb_open_device", op_webusb_open_device);
+  super::reg_json_async(rt, "op_webusb_get_devices", op_webusb_get_devices);
+  super::reg_json_async(rt, "op_webusb_open_device", op_webusb_open_device);
   super::reg_json_async(
     rt,
     "op_webusb_claim_interface",
