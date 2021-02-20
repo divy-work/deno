@@ -58,10 +58,10 @@ pub struct UsbDevice {
   device_version_major: u8,
   device_version_minor: u8,
   device_version_subminor: u8,
-  manufacturer_name: String,
+  manufacturer_name: Option<String>,
   product_id: u16,
-  product_name: String,
-  serial_number: String,
+  product_name: Option<String>,
+  serial_number: Option<String>,
   usb_version_major: u8,
   usb_version_minor: u8,
   usb_version_subminor: u8,
@@ -264,6 +264,15 @@ pub async fn op_webusb_select_alternate_interface(
   Ok(json!({}))
 }
 
+macro_rules! handle_err_to_none {
+  ($e: expr) => {
+    match $e {
+      Err(_) => None,
+      Ok(n) => Some(n),
+    }
+  };
+}
+
 pub async fn op_webusb_release_interface(
   state: Rc<RefCell<OpState>>,
   args: Value,
@@ -334,9 +343,14 @@ pub async fn op_webusb_get_devices(
     };
 
     let handle = device.open()?;
-    let manufacturer_name = handle.read_manufacturer_string_ascii(&device_descriptor)?;
-    let product_name = handle.read_product_string_ascii(&device_descriptor)?;
-    let serial_number = handle.read_serial_number_string_ascii(&device_descriptor)?;
+    let manufacturer_name = handle_err_to_none!(
+      handle.read_manufacturer_string_ascii(&device_descriptor)
+    );
+    let product_name =
+      handle_err_to_none!(handle.read_product_string_ascii(&device_descriptor));
+    let serial_number = handle_err_to_none!(
+      handle.read_serial_number_string_ascii(&device_descriptor)
+    );
     let usbdevice = UsbDevice {
       configuration,
       device_class: device_descriptor.class_code(),
