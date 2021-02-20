@@ -16,10 +16,12 @@ use deno_core::Resource;
 use deno_core::ZeroCopyBuf;
 use libusb1_sys::libusb_close;
 use rusb::{Device, DeviceHandle, GlobalContext};
+use rusb::request_type;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 pub use rusb; // Re-export rusb
 
@@ -109,6 +111,41 @@ struct ClearHaltArgs {
   rid: u32,
   direction: Direction,
   endpoint_number: u8,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum WebUSBRequestType {
+  Standard,
+  Class,
+  Vendor,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum WebUSBRecipient {
+  Device,
+  Interface,
+  Endpoint,
+  Other,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupArgs {
+  request_type: WebUSBRequestType,
+  recipient:  WebUSBRecipient,
+  request: u8,
+  value: u16,
+  index: u16,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ControlTransferOutArgs {
+  rid: u32,
+  setup: SetupArgs,
+  data: Vec<u8>,
 }
 
 pub struct UsbResource {
@@ -213,6 +250,44 @@ pub async fn op_webusb_select_configuration(
 
   let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
   handle.set_active_configuration(configuration_value)?;
+  Ok(json!({}))
+}
+
+pub async fn op_webusb_control_transfer_out(
+  state: Rc<RefCell<OpState>>,
+  args: Value,
+  _zero_copy: BufVec,
+) -> Result<Value, AnyError> {
+  let args: ControlTransferOutArgs = serde_json::from_value(args)?;
+  let rid = args.rid;
+  let setup = args.setup;
+  let buf = args.data;
+  
+  let req = match setup.request_type {
+    WebUSBRequestType::Standard => rusb::RequestType::Standard,
+    WebUSBRequestType::Class => rusb::RequestType::Class,
+    WebUSBRequestType::Vendor => rusb::RequestType::Vendor,
+  };
+
+  let recipient = match setup.recipient {
+    WebUSBRecipient::Device => rusb::Recipient::Device,
+    WebUSBRecipient::Interface => rusb::Recipient::Interface,
+    WebUSBRecipient::Endpoint => rusb::Recipient::Endpoint,
+    WebUSBRecipient::Other => rusb::Recipient::Other,
+  };
+
+  let req_type = request_type(rusb::Direction::Out, req, recipient);
+
+  let resource = state
+    .borrow()
+    .resource_table
+    .get::<UsbHandleResource>(rid)
+    .ok_or_else(bad_resource_id)?;
+
+  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  // http://libusb.sourceforge.net/api-1.0/group__libusb__syncio.html 
+  // For unlimited timeout, use value `0`.
+  let b = handle.write_control(req_type, setup.request, setup.value, setup.index, &buf, Duration::new(0, 0))?;
   Ok(json!({}))
 }
 
