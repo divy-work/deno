@@ -15,8 +15,8 @@ use deno_core::RcRef;
 use deno_core::Resource;
 use deno_core::ZeroCopyBuf;
 use libusb1_sys::libusb_close;
-use rusb::{Device, DeviceHandle, UsbContext, Context};
 use rusb::request_type;
+use rusb::{Context, Device, DeviceHandle, UsbContext};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -142,7 +142,7 @@ enum WebUSBRecipient {
 #[serde(rename_all = "camelCase")]
 struct SetupArgs {
   request_type: WebUSBRequestType,
-  recipient:  WebUSBRecipient,
+  recipient: WebUSBRecipient,
   request: u8,
   value: u16,
   index: u16,
@@ -227,17 +227,13 @@ pub async fn op_webusb_close_device(
   let rid = args.rid;
 
   let resource = state
-    .borrow()
+    .borrow_mut()
     .resource_table
-    .get::<UsbHandleResource>(rid)
+    .take::<UsbHandleResource>(rid)
     .ok_or_else(bad_resource_id)?;
 
   let handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
-  // TODO(@littledivy): use `drop(handle);` instead?
-  // rusb does not provide a close method instead it implements it as a Drop trait.
-  unsafe {
-    libusb_close(handle.as_raw());
-  }
+  drop(handle);
   Ok(json!({}))
 }
 
@@ -273,7 +269,7 @@ pub async fn op_webusb_transfer_in(
   // Ported from the Chromium codebase.
   // https://chromium.googlesource.com/chromium/src/+/master/services/device/usb/usb_device_handle_impl.cc#789
   let endpoint_addr = EP_DIR_IN | endpoint_number;
-  
+
   let resource = state
     .borrow()
     .resource_table
@@ -284,13 +280,16 @@ pub async fn op_webusb_transfer_in(
 
   let mut transfer_type: Option<rusb::TransferType> = None;
   let cnf = handle
-  .device() // -> Device<T>
-  .active_config_descriptor()?; // -> ConfigDescriptor<T>
+    .device() // -> Device<T>
+    .active_config_descriptor()?; // -> ConfigDescriptor<T>
   let interfaces = cnf.interfaces(); // -> Interfaces<'a>
-   
+
   for interface in interfaces {
-    for descriptor in interface.descriptors() { // InterfaceDescriptor in Vec<Interface<'a>>
-      let endpoint_desc = descriptor.endpoint_descriptors().find(|s| &s.address() == &endpoint_addr);
+    for descriptor in interface.descriptors() {
+      // InterfaceDescriptor in Vec<Interface<'a>>
+      let endpoint_desc = descriptor
+        .endpoint_descriptors()
+        .find(|s| &s.address() == &endpoint_addr);
       if endpoint_desc.is_none() {
         continue;
       }
@@ -303,15 +302,66 @@ pub async fn op_webusb_transfer_in(
     Some(t) => {
       let mut data = Vec::with_capacity(args.length);
       match t {
-        rusb::TransferType::Bulk => handle.read_bulk(endpoint_number, &mut data, Duration::new(0, 0))?,
-        rusb::TransferType::Interrupt => handle.read_interrupt(endpoint_number, &mut data, Duration::new(0, 0))?,
-        _ => return Ok(json!({}))
+        rusb::TransferType::Bulk => {
+          handle.read_bulk(endpoint_number, &mut data, Duration::new(0, 0))?
+        }
+        rusb::TransferType::Interrupt => handle.read_interrupt(
+          endpoint_number,
+          &mut data,
+          Duration::new(0, 0),
+        )?,
+        _ => return Ok(json!({})),
       };
       Ok(json!({ "data": data }))
-    },
+    }
     None => Ok(json!({})),
   }
-  
+}
+
+pub async fn op_webusb_control_transfer_in(
+  state: Rc<RefCell<OpState>>,
+  args: Value,
+  _zero_copy: BufVec,
+) -> Result<Value, AnyError> {
+  // Re-using ControlTransferOut struct here.
+  let args: ControlTransferOutArgs = serde_json::from_value(args)?;
+  let rid = args.rid;
+  let setup = args.setup;
+  let buf = args.data;
+
+  let req = match setup.request_type {
+    WebUSBRequestType::Standard => rusb::RequestType::Standard,
+    WebUSBRequestType::Class => rusb::RequestType::Class,
+    WebUSBRequestType::Vendor => rusb::RequestType::Vendor,
+  };
+
+  let recipient = match setup.recipient {
+    WebUSBRecipient::Device => rusb::Recipient::Device,
+    WebUSBRecipient::Interface => rusb::Recipient::Interface,
+    WebUSBRecipient::Endpoint => rusb::Recipient::Endpoint,
+    WebUSBRecipient::Other => rusb::Recipient::Other,
+  };
+
+  let req_type = request_type(rusb::Direction::In, req, recipient);
+
+  let resource = state
+    .borrow()
+    .resource_table
+    .get::<UsbHandleResource>(rid)
+    .ok_or_else(bad_resource_id)?;
+
+  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  // http://libusb.sourceforge.net/api-1.0/group__libusb__syncio.html
+  // For unlimited timeout, use value `0`.
+  let b = handle.write_control(
+    req_type,
+    setup.request,
+    setup.value,
+    setup.index,
+    &buf,
+    Duration::new(0, 0),
+  )?;
+  Ok(json!({}))
 }
 
 pub async fn op_webusb_control_transfer_out(
@@ -323,7 +373,7 @@ pub async fn op_webusb_control_transfer_out(
   let rid = args.rid;
   let setup = args.setup;
   let buf = args.data;
-  
+
   let req = match setup.request_type {
     WebUSBRequestType::Standard => rusb::RequestType::Standard,
     WebUSBRequestType::Class => rusb::RequestType::Class,
@@ -346,9 +396,16 @@ pub async fn op_webusb_control_transfer_out(
     .ok_or_else(bad_resource_id)?;
 
   let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
-  // http://libusb.sourceforge.net/api-1.0/group__libusb__syncio.html 
+  // http://libusb.sourceforge.net/api-1.0/group__libusb__syncio.html
   // For unlimited timeout, use value `0`.
-  let b = handle.write_control(req_type, setup.request, setup.value, setup.index, &buf, Duration::new(0, 0))?;
+  let b = handle.write_control(
+    req_type,
+    setup.request,
+    setup.value,
+    setup.index,
+    &buf,
+    Duration::new(0, 0),
+  )?;
   Ok(json!({}))
 }
 

@@ -61,6 +61,14 @@
       );
     }
 
+    async controlTransferIn(setup, data) {
+      if (!this.opened) throw new Error("The device must be opened first.");
+      return await core.jsonOpAsync(
+        "op_webusb_control_transfer_in",
+        { rid: this.#deviceHandleRid, setup, data },
+      );
+    }
+
     async transferIn(endpointNumber, length) {
       if (!this.opened) throw new Error("The device must be opened first.");
       return await core.jsonOpAsync(
