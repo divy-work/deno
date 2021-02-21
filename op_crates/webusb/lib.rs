@@ -15,7 +15,7 @@ use deno_core::RcRef;
 use deno_core::Resource;
 use deno_core::ZeroCopyBuf;
 use libusb1_sys::libusb_close;
-use rusb::{Device, DeviceHandle, GlobalContext};
+use rusb::{Device, DeviceHandle, UsbContext, Context};
 use rusb::request_type;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -157,11 +157,11 @@ struct ControlTransferOutArgs {
 }
 
 pub struct UsbResource {
-  device: Device<GlobalContext>,
+  device: Device<Context>,
 }
 
 pub struct UsbHandleResource {
-  handle: AsyncRefCell<DeviceHandle<GlobalContext>>,
+  handle: AsyncRefCell<DeviceHandle<Context>>,
 }
 
 impl Resource for UsbHandleResource {
@@ -454,7 +454,7 @@ pub async fn op_webusb_get_devices(
   _args: Value,
   _zero_copy: BufVec,
 ) -> Result<Value, AnyError> {
-  let devices = rusb::devices().unwrap();
+  let devices = rusb::Context::new().unwrap().devices().unwrap();
 
   #[derive(Serialize)]
   struct Device {
@@ -465,8 +465,13 @@ pub async fn op_webusb_get_devices(
   let mut usbdevices: Vec<Device> = vec![];
   let mut state = state.borrow_mut();
   for device in devices.iter() {
-    let config_descriptor = device.active_config_descriptor();
     let device_descriptor = device.device_descriptor().unwrap();
+    let device_class = device_descriptor.class_code();
+    // Do not list hubs. Ignore them.
+    if device_class == 9 {
+      continue;
+    };
+    let config_descriptor = device.active_config_descriptor();
     let device_version = device_descriptor.device_version();
     let usb_version = device_descriptor.usb_version();
 
@@ -489,7 +494,7 @@ pub async fn op_webusb_get_devices(
     );
     let usbdevice = UsbDevice {
       configuration,
-      device_class: device_descriptor.class_code(),
+      device_class,
       device_subclass: device_descriptor.sub_class_code(),
       device_protocol: device_descriptor.protocol_code(),
       device_version_major: device_version.major(),
