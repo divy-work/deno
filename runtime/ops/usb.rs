@@ -11,6 +11,7 @@ use deno_webusb::op_webusb_reset;
 use deno_webusb::op_webusb_select_alternate_interface;
 use deno_webusb::op_webusb_select_configuration;
 use deno_webusb::op_webusb_transfer_in;
+use deno_webusb::op_webusb_transfer_out;
 
 pub fn init(rt: &mut deno_core::JsRuntime) {
   super::reg_json_async(rt, "op_webusb_get_devices", op_webusb_get_devices);
@@ -49,4 +50,5 @@ pub fn init(rt: &mut deno_core::JsRuntime) {
     op_webusb_control_transfer_out,
   );
   super::reg_json_async(rt, "op_webusb_transfer_in", op_webusb_transfer_in);
+  super::reg_json_async(rt, "op_webusb_transfer_out", op_webusb_transfer_out);
 }

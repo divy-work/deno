@@ -122,6 +122,14 @@ struct TransferInArgs {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TransferOutArgs {
+  rid: u32,
+  data: Vec<u8>,
+  endpoint_number: u8,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum WebUSBRequestType {
   Standard,
@@ -255,6 +263,65 @@ pub async fn op_webusb_select_configuration(
   let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
   handle.set_active_configuration(configuration_value)?;
   Ok(json!({}))
+}
+
+pub async fn op_webusb_transfer_out(
+  state: Rc<RefCell<OpState>>,
+  args: Value,
+  _zero_copy: BufVec,
+) -> Result<Value, AnyError> {
+  let args: TransferOutArgs = serde_json::from_value(args)?;
+  let rid = args.rid;
+  let endpoint_number = args.endpoint_number;
+
+  // Ported from the Chromium codebase.
+  // https://chromium.googlesource.com/chromium/src/+/master/services/device/usb/usb_device_handle_impl.cc#789
+  let endpoint_addr = EP_DIR_IN | endpoint_number;
+
+  let resource = state
+    .borrow()
+    .resource_table
+    .get::<UsbHandleResource>(rid)
+    .ok_or_else(bad_resource_id)?;
+
+  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+
+  let mut transfer_type: Option<rusb::TransferType> = None;
+  let cnf = handle
+    .device() // -> Device<T>
+    .active_config_descriptor()?; // -> ConfigDescriptor<T>
+  let interfaces = cnf.interfaces(); // -> Interfaces<'a>
+
+  for interface in interfaces {
+    for descriptor in interface.descriptors() {
+      // InterfaceDescriptor in Vec<Interface<'a>>
+      let endpoint_desc = descriptor
+        .endpoint_descriptors()
+        .find(|s| &s.address() == &endpoint_addr);
+      if endpoint_desc.is_none() {
+        continue;
+      }
+      transfer_type = Some(endpoint_desc.unwrap().transfer_type());
+      // find the address of a Endpoint in every EndpointDescriptor of every InterfaceDescriptor.
+    }
+  }
+
+  match transfer_type {
+    Some(t) => {
+      let data = args.data;
+      let bytesWritten = match t {
+        rusb::TransferType::Bulk => {
+          handle.write_bulk(endpoint_number, &data, Duration::new(0, 0))?
+        }
+        rusb::TransferType::Interrupt => {
+          handle.write_interrupt(endpoint_number, &data, Duration::new(0, 0))?
+        }
+        _ => return Ok(json!({})),
+      };
+      Ok(json!({ "bytesWritten": bytesWritten }))
+    }
+    None => Ok(json!({})),
+  }
 }
 
 pub async fn op_webusb_transfer_in(
