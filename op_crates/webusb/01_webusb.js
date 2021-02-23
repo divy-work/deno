@@ -85,6 +85,14 @@
       );
     }
 
+    async isochronousTransferIn(endpointNumber, packetLengths) {
+      if (!this.opened) throw new Error("The device must be opened first.");
+      return await core.jsonOpAsync(
+        "op_webusb_iso_transfer_in",
+        { rid: this.#deviceHandleRid, endpointNumber, packetLengths },
+      );
+    }
+
     async reset() {
       if (!this.opened) throw new Error("The device must be opened first.");
       return await core.jsonOpAsync(
