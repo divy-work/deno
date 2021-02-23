@@ -491,7 +491,7 @@ pub async fn op_webusb_iso_transfer_in(
 
   let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
   unsafe {
-    let mut buffer: Vec<u8> = vec![];
+    let mut buffer: &mut [u8] = &mut vec![];
 
     let mut transfer = libusb_alloc_transfer(num_packets);
 
@@ -500,7 +500,7 @@ pub async fn op_webusb_iso_transfer_in(
       transfer,
       handle.as_raw(),
       endpoint_addr,
-      &mut buffer[0],
+      buffer.as_mut_ptr(),
       length,
       num_packets,
       noop_transfer_cb,
@@ -519,11 +519,13 @@ pub async fn op_webusb_iso_transfer_in(
     let mut packets = IsochronousPackets::new();
     for pkt in (*transfer).iso_packet_desc.iter() {
       let status = WebUSBTransferStatus::from_libusb_status(pkt.status);
-      let packet = IsochronousPacket::new(vec![], status);
+      let data: Vec<u8> = vec![];
+      let packet = IsochronousPacket::new(data, status);
       packets.push(packet)
     }
 
-    let result = IsochronousTransferOutResult::new(packets.packets(), buffer);
+    let result =
+      IsochronousTransferOutResult::new(packets.packets(), buffer.to_vec());
     Ok(json!(result))
   }
 }
