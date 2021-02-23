@@ -14,7 +14,7 @@ use deno_core::OpState;
 use deno_core::RcRef;
 use deno_core::Resource;
 use deno_core::ZeroCopyBuf;
-use libusb1_sys::constants::LIBUSB_SUCCESS;
+use libusb1_sys::constants::*;
 use libusb1_sys::libusb_alloc_transfer;
 use libusb1_sys::libusb_fill_iso_transfer;
 use libusb1_sys::libusb_submit_transfer;
@@ -150,16 +150,33 @@ enum WebUSBRecipient {
   Other,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "lowercase")]
 enum WebUSBTransferStatus {
   Completed,
   TransferError,
   Timeout,
-  Stalled,
+  Stall,
   Disconnect,
-  Babbled,
+  Babble,
   Cancelled,
+}
+
+impl WebUSBTransferStatus {
+  pub fn from_libusb_status(status: i32) -> Self {
+    match status {
+      LIBUSB_TRANSFER_COMPLETED => WebUSBTransferStatus::Completed,
+      LIBUSB_TRANSFER_ERROR => WebUSBTransferStatus::TransferError,
+      // Should never happen but no harm to keep it.
+      LIBUSB_TRANSFER_TIMED_OUT => WebUSBTransferStatus::Timeout,
+      LIBUSB_TRANSFER_STALL => WebUSBTransferStatus::Stall,
+      LIBUSB_TRANSFER_NO_DEVICE => WebUSBTransferStatus::Disconnect,
+      LIBUSB_TRANSFER_OVERFLOW => WebUSBTransferStatus::Babble,
+      LIBUSB_TRANSFER_CANCELLED => WebUSBTransferStatus::Completed,
+      // Unreachable but we'll settle for a TransferError.
+      _ => WebUSBTransferStatus::TransferError,
+    }
+  }
 }
 
 #[derive(Deserialize)]
@@ -188,7 +205,7 @@ struct IsoTransferInArgs {
   packet_lengths: Vec<i32>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct IsochronousPacket {
   data: Vec<u8>,
@@ -198,6 +215,23 @@ struct IsochronousPacket {
 impl IsochronousPacket {
   pub fn new(data: Vec<u8>, status: WebUSBTransferStatus) -> Self {
     Self { data, status }
+  }
+}
+
+#[derive(Clone)]
+struct IsochronousPackets(Vec<IsochronousPacket>);
+
+impl IsochronousPackets {
+  pub fn new() -> Self {
+    Self(vec![])
+  }
+
+  pub fn push(&mut self, packet: IsochronousPacket) {
+    self.0.push(packet);
+  }
+
+  pub fn packets(&mut self) -> Vec<IsochronousPacket> {
+    self.0.clone()
   }
 }
 
@@ -482,9 +516,15 @@ pub async fn op_webusb_iso_transfer_in(
     if rv != LIBUSB_SUCCESS {
       // TODO: handle error
     }
-    // TODO: packets
-    let packets = IsochronousTransferOutResult::new(vec![], buffer);
-    Ok(json!(packets))
+    let mut packets = IsochronousPackets::new();
+    for pkt in (*transfer).iso_packet_desc.iter() {
+      let status = WebUSBTransferStatus::from_libusb_status(pkt.status);
+      let packet = IsochronousPacket::new(vec![], status);
+      packets.push(packet)
+    }
+
+    let result = IsochronousTransferOutResult::new(packets.packets(), buffer);
+    Ok(json!(result))
   }
 }
 
