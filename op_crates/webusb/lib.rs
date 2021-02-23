@@ -14,11 +14,11 @@ use deno_core::OpState;
 use deno_core::RcRef;
 use deno_core::Resource;
 use deno_core::ZeroCopyBuf;
+use libusb1_sys::constants::LIBUSB_SUCCESS;
 use libusb1_sys::libusb_alloc_transfer;
 use libusb1_sys::libusb_fill_iso_transfer;
-use libusb1_sys::libusb_transfer_cb_fn;
 use libusb1_sys::libusb_submit_transfer;
-use libusb1_sys::constants::LIBUSB_SUCCESS;
+use libusb1_sys::libusb_transfer_cb_fn;
 use rusb::request_type;
 use rusb::{Context, Device, DeviceHandle, UsbContext};
 use serde::{Deserialize, Serialize};
@@ -150,7 +150,7 @@ enum WebUSBRecipient {
   Other,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
 enum WebUSBTransferStatus {
   Completed,
@@ -188,12 +188,30 @@ struct IsoTransferInArgs {
   packet_lengths: Vec<i32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct IsochronousPacket {
-  length: i32,
-  transferred_length: i32,
+  data: Vec<u8>,
   status: WebUSBTransferStatus,
+}
+
+impl IsochronousPacket {
+  pub fn new(data: Vec<u8>, status: WebUSBTransferStatus) -> Self {
+    Self { data, status }
+  }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IsochronousTransferOutResult {
+  packets: Vec<IsochronousPacket>,
+  data: Vec<u8>,
+}
+
+impl IsochronousTransferOutResult {
+  pub fn new(packets: Vec<IsochronousPacket>, data: Vec<u8>) -> Self {
+    Self { packets, data }
+  }
 }
 
 pub struct UsbResource {
@@ -341,7 +359,7 @@ pub async fn op_webusb_transfer_out(
   match transfer_type {
     Some(t) => {
       let data = args.data;
-      let bytesWritten = match t {
+      let bytes_written = match t {
         rusb::TransferType::Bulk => {
           handle.write_bulk(endpoint_number, &data, Duration::new(0, 0))?
         }
@@ -350,7 +368,7 @@ pub async fn op_webusb_transfer_out(
         }
         _ => return Ok(json!({})),
       };
-      Ok(json!({ "bytesWritten": bytesWritten }))
+      Ok(json!({ "bytesWritten": bytes_written }))
     }
     None => Ok(json!({})),
   }
@@ -417,7 +435,8 @@ pub async fn op_webusb_transfer_in(
   }
 }
 
-extern "system" fn transfer_cb(_: *mut libusb1_sys::libusb_transfer) {}
+extern "system" fn noop_transfer_cb(_: *mut libusb1_sys::libusb_transfer) {}
+
 pub async fn op_webusb_iso_transfer_in(
   state: Rc<RefCell<OpState>>,
   args: Value,
@@ -437,11 +456,23 @@ pub async fn op_webusb_iso_transfer_in(
     .ok_or_else(bad_resource_id)?;
 
   let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
-  let mut buffer: Vec<u8> = vec![];
   unsafe {
+    let mut buffer: Vec<u8> = vec![];
+
     let mut transfer = libusb_alloc_transfer(num_packets);
+
     let mut p: *mut core::ffi::c_void = std::ptr::null_mut();
-    libusb_fill_iso_transfer(transfer, handle.as_raw(), endpoint_addr, &mut buffer[0], length, num_packets, transfer_cb, p, 0);
+    libusb_fill_iso_transfer(
+      transfer,
+      handle.as_raw(),
+      endpoint_addr,
+      &mut buffer[0],
+      length,
+      num_packets,
+      noop_transfer_cb,
+      p,
+      0,
+    );
 
     for (i, packet) in packet_lengths.iter().enumerate() {
       (*transfer).iso_packet_desc[i].length = *packet as u32;
@@ -451,11 +482,10 @@ pub async fn op_webusb_iso_transfer_in(
     if rv != LIBUSB_SUCCESS {
       // TODO: handle error
     }
-
-
+    // TODO: packets
+    let packets = IsochronousTransferOutResult::new(vec![], buffer);
+    Ok(json!(packets))
   }
-
-  Ok(json!({}))
 }
 
 pub async fn op_webusb_control_transfer_in(
