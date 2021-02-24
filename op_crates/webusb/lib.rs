@@ -421,16 +421,37 @@ pub async fn op_webusb_transfer_out(
   match transfer_type {
     Some(t) => {
       let data = args.data;
+      let mut status = WebUSBTransferStatus::Completed;
       let bytes_written = match t {
         rusb::TransferType::Bulk => {
-          handle.write_bulk(endpoint_number, &data, Duration::new(0, 0))?
+          match handle.write_bulk(endpoint_number, &data, Duration::new(0, 0)) {
+            Ok(bw) => bw,
+            Err(err) => {
+              status = WebUSBTransferStatus::from_rusb_error(err);
+              0
+            }
+          }
         }
         rusb::TransferType::Interrupt => {
-          handle.write_interrupt(endpoint_number, &data, Duration::new(0, 0))?
+          match handle.write_interrupt(
+            endpoint_number,
+            &data,
+            Duration::new(0, 0),
+          ) {
+            Ok(bw) => bw,
+            Err(err) => {
+              status = WebUSBTransferStatus::from_rusb_error(err);
+              0
+            }
+          }
         }
-        _ => return Ok(json!({})),
+        _ => {
+          return Ok(
+            json!({ "bytes_written": 0, "status": WebUSBTransferStatus::TransferError }),
+          )
+        }
       };
-      Ok(json!({ "bytesWritten": bytes_written }))
+      Ok(json!({ "bytesWritten": bytes_written, "status": status }))
     }
     None => Ok(json!({})),
   }
@@ -477,24 +498,49 @@ pub async fn op_webusb_transfer_in(
     }
   }
 
+  let mut data = Vec::with_capacity(args.length);
   match transfer_type {
-    Some(t) => {
-      let mut data = Vec::with_capacity(args.length);
-      match t {
-        rusb::TransferType::Bulk => {
-          handle.read_bulk(endpoint_number, &mut data, Duration::new(0, 0))?
+    Some(t) => match t {
+      rusb::TransferType::Bulk => {
+        match handle.read_bulk(endpoint_number, &mut data, Duration::new(0, 0))
+        {
+          Ok(_) => {}
+          Err(err) => {
+            return Ok(
+              json!({ "status": WebUSBTransferStatus::from_rusb_error(err), "data": data }),
+            )
+          }
         }
-        rusb::TransferType::Interrupt => handle.read_interrupt(
+      }
+      rusb::TransferType::Interrupt => {
+        match handle.read_interrupt(
           endpoint_number,
           &mut data,
           Duration::new(0, 0),
-        )?,
-        _ => return Ok(json!({})),
-      };
-      Ok(json!({ "data": data }))
+        ) {
+          Ok(_) => {}
+          Err(err) => {
+            return Ok(
+              json!({ "status": WebUSBTransferStatus::from_rusb_error(err), "data": data }),
+            )
+          }
+        }
+      }
+      _ => {
+        return Ok(
+          json!({ "status": WebUSBTransferStatus::TransferError, "data": data }),
+        )
+      }
+    },
+    // TODO(littledivy): Is this the right status to return?
+    None => {
+      return Ok(
+        json!({ "status": WebUSBTransferStatus::TransferError, "data": data }),
+      )
     }
-    None => Ok(json!({})),
-  }
+  };
+
+  Ok(json!({ "status": WebUSBTransferStatus::Completed, "data": data }))
 }
 
 extern "system" fn noop_transfer_cb(_: *mut libusb1_sys::libusb_transfer) {}
