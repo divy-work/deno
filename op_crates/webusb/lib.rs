@@ -246,15 +246,22 @@ impl IsochronousPackets {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct IsochronousTransferOutResult {
+struct IsochronousTransferInResult {
   packets: Vec<IsochronousPacket>,
   data: Vec<u8>,
 }
 
-impl IsochronousTransferOutResult {
+impl IsochronousTransferInResult {
   pub fn new(packets: Vec<IsochronousPacket>, data: Vec<u8>) -> Self {
     Self { packets, data }
   }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IsochronousTransferOutResult {
+  packets: Vec<IsochronousPacket>,
+  bytes_written: i32,
 }
 
 pub struct UsbResource {
@@ -534,7 +541,7 @@ pub async fn op_webusb_iso_transfer_in(
     }
 
     let result =
-      IsochronousTransferOutResult::new(packets.packets(), buffer.to_vec());
+      IsochronousTransferInResult::new(packets.packets(), buffer.to_vec());
     Ok(json!(result))
   }
 }
@@ -550,7 +557,7 @@ pub async fn op_webusb_iso_transfer_out(
   let packet_lengths = args.packet_lengths;
   let length: i32 = packet_lengths.iter().sum();
   let num_packets = packet_lengths.len() as i32;
-
+  let mut buffer = args.data;
   let resource = state
     .borrow()
     .resource_table
@@ -559,7 +566,42 @@ pub async fn op_webusb_iso_transfer_out(
 
   let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
 
-  Ok(json!({}))
+  unsafe {
+    let mut transfer = libusb_alloc_transfer(num_packets);
+
+    let mut p: *mut core::ffi::c_void = std::ptr::null_mut();
+    libusb_fill_iso_transfer(
+      transfer,
+      handle.as_raw(),
+      endpoint_addr,
+      buffer.as_mut_ptr(),
+      length,
+      num_packets,
+      noop_transfer_cb,
+      p,
+      0,
+    );
+
+    for (i, packet) in packet_lengths.iter().enumerate() {
+      (*transfer).iso_packet_desc[i].length = *packet as u32;
+    }
+
+    let rv = libusb_submit_transfer(transfer);
+    if rv != LIBUSB_SUCCESS {
+      // TODO: handle error
+    }
+    let mut packets = IsochronousPackets::new();
+    for pkt in (*transfer).iso_packet_desc.iter() {
+      let status = WebUSBTransferStatus::from_libusb_status(pkt.status);
+      let data: Vec<u8> = vec![];
+      let packet = IsochronousPacket::new(data, status);
+      packets.push(packet)
+    }
+
+    let bytes_written = (*transfer).actual_length;
+    let result = IsochronousTransferOutResult { packets: packets.packets(), bytes_written };
+    Ok(json!(result))
+  }
 }
 
 pub async fn op_webusb_control_transfer_in(
