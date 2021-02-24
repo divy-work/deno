@@ -13,12 +13,10 @@ use deno_core::JsRuntime;
 use deno_core::OpState;
 use deno_core::RcRef;
 use deno_core::Resource;
-use deno_core::ZeroCopyBuf;
 use libusb1_sys::constants::*;
 use libusb1_sys::libusb_alloc_transfer;
 use libusb1_sys::libusb_fill_iso_transfer;
 use libusb1_sys::libusb_submit_transfer;
-use libusb1_sys::libusb_transfer_cb_fn;
 use rusb::request_type;
 use rusb::{Context, Device, DeviceHandle, UsbContext};
 use serde::{Deserialize, Serialize};
@@ -172,8 +170,22 @@ impl WebUSBTransferStatus {
       LIBUSB_TRANSFER_STALL => WebUSBTransferStatus::Stall,
       LIBUSB_TRANSFER_NO_DEVICE => WebUSBTransferStatus::Disconnect,
       LIBUSB_TRANSFER_OVERFLOW => WebUSBTransferStatus::Babble,
-      LIBUSB_TRANSFER_CANCELLED => WebUSBTransferStatus::Completed,
+      LIBUSB_TRANSFER_CANCELLED => WebUSBTransferStatus::Cancelled,
       // Unreachable but we'll settle for a TransferError.
+      _ => WebUSBTransferStatus::TransferError,
+    }
+  }
+
+  pub fn from_rusb_error(error: rusb::Error) -> Self {
+    match error {
+      rusb::Error::NoDevice | rusb::Error::NotFound => {
+        WebUSBTransferStatus::Disconnect
+      }
+      rusb::Error::Busy => WebUSBTransferStatus::Stall,
+      rusb::Error::Timeout => WebUSBTransferStatus::Timeout,
+      rusb::Error::Overflow => WebUSBTransferStatus::Babble,
+      rusb::Error::Pipe => WebUSBTransferStatus::TransferError,
+      rusb::Error::NoMem => WebUSBTransferStatus::Babble,
       _ => WebUSBTransferStatus::TransferError,
     }
   }
@@ -384,7 +396,7 @@ pub async fn op_webusb_transfer_out(
     .get::<UsbHandleResource>(rid)
     .ok_or_else(bad_resource_id)?;
 
-  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  let handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
 
   let mut transfer_type: Option<rusb::TransferType> = None;
   let cnf = handle
@@ -443,7 +455,7 @@ pub async fn op_webusb_transfer_in(
     .get::<UsbHandleResource>(rid)
     .ok_or_else(bad_resource_id)?;
 
-  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  let handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
 
   let mut transfer_type: Option<rusb::TransferType> = None;
   let cnf = handle
@@ -505,13 +517,13 @@ pub async fn op_webusb_iso_transfer_in(
     .get::<UsbHandleResource>(rid)
     .ok_or_else(bad_resource_id)?;
 
-  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  let handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
   unsafe {
-    let mut buffer: &mut [u8] = &mut vec![];
+    let buffer: &mut [u8] = &mut vec![];
 
     let mut transfer = libusb_alloc_transfer(num_packets);
 
-    let mut p: *mut core::ffi::c_void = std::ptr::null_mut();
+    let p: *mut core::ffi::c_void = std::ptr::null_mut();
     libusb_fill_iso_transfer(
       transfer,
       handle.as_raw(),
@@ -564,12 +576,12 @@ pub async fn op_webusb_iso_transfer_out(
     .get::<UsbHandleResource>(rid)
     .ok_or_else(bad_resource_id)?;
 
-  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  let handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
 
   unsafe {
     let mut transfer = libusb_alloc_transfer(num_packets);
 
-    let mut p: *mut core::ffi::c_void = std::ptr::null_mut();
+    let p: *mut core::ffi::c_void = std::ptr::null_mut();
     libusb_fill_iso_transfer(
       transfer,
       handle.as_raw(),
@@ -599,7 +611,10 @@ pub async fn op_webusb_iso_transfer_out(
     }
 
     let bytes_written = (*transfer).actual_length;
-    let result = IsochronousTransferOutResult { packets: packets.packets(), bytes_written };
+    let result = IsochronousTransferOutResult {
+      packets: packets.packets(),
+      bytes_written,
+    };
     Ok(json!(result))
   }
 }
@@ -636,7 +651,7 @@ pub async fn op_webusb_control_transfer_in(
     .get::<UsbHandleResource>(rid)
     .ok_or_else(bad_resource_id)?;
 
-  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  let handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
   // http://libusb.sourceforge.net/api-1.0/group__libusb__syncio.html
   // For unlimited timeout, use value `0`.
   let b = handle.write_control(
@@ -681,18 +696,24 @@ pub async fn op_webusb_control_transfer_out(
     .get::<UsbHandleResource>(rid)
     .ok_or_else(bad_resource_id)?;
 
-  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  let handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
   // http://libusb.sourceforge.net/api-1.0/group__libusb__syncio.html
   // For unlimited timeout, use value `0`.
-  let b = handle.write_control(
+  match handle.write_control(
     req_type,
     setup.request,
     setup.value,
     setup.index,
     &buf,
     Duration::new(0, 0),
-  )?;
-  Ok(json!({}))
+  ) {
+    Ok(bytes_written) => Ok(
+      json!({ "bytesWritten": bytes_written, "status": WebUSBTransferStatus::Completed }),
+    ),
+    Err(err) => Ok(
+      json!({ "bytesWritten": 0, "status": WebUSBTransferStatus::from_rusb_error(err) }),
+    ),
+  }
 }
 
 pub async fn op_webusb_clear_halt(
