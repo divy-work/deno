@@ -205,6 +205,15 @@ struct IsoTransferInArgs {
   packet_lengths: Vec<i32>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IsoTransferOutArgs {
+  rid: u32,
+  endpoint_number: u8,
+  data: Vec<u8>,
+  packet_lengths: Vec<i32>,
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct IsochronousPacket {
@@ -528,6 +537,29 @@ pub async fn op_webusb_iso_transfer_in(
       IsochronousTransferOutResult::new(packets.packets(), buffer.to_vec());
     Ok(json!(result))
   }
+}
+
+pub async fn op_webusb_iso_transfer_out(
+  state: Rc<RefCell<OpState>>,
+  args: Value,
+  _zero_copy: BufVec,
+) -> Result<Value, AnyError> {
+  let args: IsoTransferOutArgs = serde_json::from_value(args)?;
+  let rid = args.rid;
+  let endpoint_addr = EP_DIR_OUT | args.endpoint_number;
+  let packet_lengths = args.packet_lengths;
+  let length: i32 = packet_lengths.iter().sum();
+  let num_packets = packet_lengths.len() as i32;
+
+  let resource = state
+    .borrow()
+    .resource_table
+    .get::<UsbHandleResource>(rid)
+    .ok_or_else(bad_resource_id)?;
+
+  let mut handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+
+  Ok(json!({}))
 }
 
 pub async fn op_webusb_control_transfer_in(
