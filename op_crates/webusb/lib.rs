@@ -54,6 +54,7 @@ pub struct UsbConfiguration {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UsbDevice {
+  configurations: Vec<UsbConfiguration>,
   configuration: Option<UsbConfiguration>,
   // TODO: Implement configurations using https://docs.rs/rusb/0.7.0/rusb/struct.Device.html#method.config_descriptor
   device_class: u8,
@@ -903,6 +904,7 @@ pub async fn op_webusb_get_devices(
       handle.read_serial_number_string_ascii(&device_descriptor)
     );
     let usbdevice = UsbDevice {
+      configurations: vec![],
       configuration,
       device_class,
       device_subclass: device_descriptor.sub_class_code(),
