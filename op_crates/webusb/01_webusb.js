@@ -111,7 +111,7 @@
 
     async open() {
       if (this.opened) throw new Error("The device is already opened.");
-      let { rid } = await core.jsonOpAsync(
+      const { rid } = await core.jsonOpAsync(
         "op_webusb_open_device",
         { rid: this.#rid },
       );
@@ -121,21 +121,25 @@
 
     async close() {
       if (!this.opened) throw new Error("The device must be opened first.");
-      await core.jsonOpAsync("op_webusb_close_device", { rid: this.#deviceHandleRid });
+      await core.jsonOpAsync("op_webusb_close_device", {
+        rid: this.#deviceHandleRid,
+      });
       this.opened = false;
     }
   }
 
   async function getDevices() {
-    let devices = await core.jsonOpAsync("op_webusb_get_devices", {});
+    const devices = await core.jsonOpAsync("op_webusb_get_devices", {});
     return devices.map(({ rid, usbdevice }) => new UsbDevice(usbdevice, rid));
   }
 
   window.usb = {
     getDevices,
+    UsbDevice,
   };
   window.__bootstrap = window.__bootstrap || {};
   window.__bootstrap.usb = {
     getDevices,
+    UsbDevice,
   };
 })(this);
