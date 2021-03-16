@@ -498,7 +498,7 @@ pub async fn op_webusb_transfer_in(
       // InterfaceDescriptor in Vec<Interface<'a>>
       let endpoint_desc = descriptor
         .endpoint_descriptors()
-        .find(|s| &s.address() == &endpoint_addr);
+        .find(|s| s.address() == endpoint_addr);
       if endpoint_desc.is_none() {
         continue;
       }
