@@ -212,6 +212,14 @@ struct ControlTransferOutArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ControlTransferInArgs {
+  rid: u32,
+  length: usize,
+  setup: SetupArgs,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct IsoTransferInArgs {
   rid: u32,
   endpoint_number: u8,
@@ -410,7 +418,7 @@ pub async fn op_webusb_transfer_out(
       // InterfaceDescriptor in Vec<Interface<'a>>
       let endpoint_desc = descriptor
         .endpoint_descriptors()
-        .find(|s| &s.address() == &endpoint_addr);
+        .find(|s| s.address() == endpoint_addr);
       if endpoint_desc.is_none() {
         continue;
       }
@@ -566,7 +574,7 @@ pub async fn op_webusb_iso_transfer_in(
 
   let handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
   unsafe {
-    let buffer: &mut [u8] = &mut vec![];
+    let buffer: &mut [u8] = &mut [];
 
     let mut transfer = libusb_alloc_transfer(num_packets);
 
@@ -671,11 +679,10 @@ pub async fn op_webusb_control_transfer_in(
   args: Value,
   _zero_copy: BufVec,
 ) -> Result<Value, AnyError> {
-  // Re-using ControlTransferOut struct here.
-  let args: ControlTransferOutArgs = serde_json::from_value(args)?;
+  let args: ControlTransferInArgs = serde_json::from_value(args)?;
   let rid = args.rid;
   let setup = args.setup;
-  let buf = args.data;
+  let length = args.length;
 
   let req = match setup.request_type {
     WebUSBRequestType::Standard => rusb::RequestType::Standard,
@@ -699,17 +706,19 @@ pub async fn op_webusb_control_transfer_in(
     .ok_or_else(bad_resource_id)?;
 
   let handle = RcRef::map(resource, |r| &r.handle).borrow_mut().await;
+  let mut buf = Vec::with_capacity(length);
   // http://libusb.sourceforge.net/api-1.0/group__libusb__syncio.html
   // For unlimited timeout, use value `0`.
-  let b = handle.write_control(
+  let data = handle.read_control(
     req_type,
     setup.request,
     setup.value,
     setup.index,
-    &buf,
+    &mut buf,
     Duration::new(0, 0),
   )?;
-  Ok(json!({}))
+
+  Ok(json!({ "data": data }))
 }
 
 pub async fn op_webusb_control_transfer_out(
