@@ -11,7 +11,7 @@ members = [
   "op_crates/fetch",
   "op_crates/url",
   "op_crates/web",
-  "op_crates/webusb"
+  "op_crates/webusb",
   "op_crates/webgpu",
   "op_crates/webidl",
   "op_crates/websocket",
