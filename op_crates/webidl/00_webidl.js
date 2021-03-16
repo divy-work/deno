@@ -14,7 +14,7 @@
     return new ErrorType(
       `${opts.prefix ? opts.prefix + ": " : ""}${
         opts.context ? opts.context : "Value"
-      } ${message}.`,
+      } ${message}`,
     );
   }
 
@@ -596,13 +596,20 @@
 
   converters.VoidFunction = convertCallbackFunction;
 
+  converters["UVString?"] = createNullableConverter(
+    converters.USVString,
+  );
+  converters["sequence<double>"] = createSequenceConverter(
+    converters["double"],
+  );
+
   function requiredArguments(length, required, opts = {}) {
     if (length < required) {
       const errMsg = `${
         opts.prefix ? opts.prefix + ": " : ""
       }${required} argument${
         required === 1 ? "" : "s"
-      }, but only ${length} present.`;
+      } required, but only ${length} present.`;
       throw new TypeError(errMsg);
     }
   }
@@ -637,13 +644,15 @@
             esMemberValue = esDict[key];
           }
 
+          const context = `'${key}' of '${name}'${
+            opts.context ? ` (${opts.context})` : ""
+          }`;
+
           if (esMemberValue !== undefined) {
             const converter = member.converter;
             const idlMemberValue = converter(esMemberValue, {
               ...opts,
-              context: `${key} of '${name}'${
-                opts.context ? `(${opts.context})` : ""
-              }`,
+              context,
             });
             idlDict[key] = idlMemberValue;
           } else if ("defaultValue" in member) {
@@ -651,8 +660,10 @@
             const idlMemberValue = defaultValue;
             idlDict[key] = idlMemberValue;
           } else if (member.required) {
-            throw new TypeError(
-              `can not be converted to '${name}' because ${key} is required in '${name}'.`,
+            throw makeException(
+              TypeError,
+              `can not be converted to '${name}' because '${key}' is required in '${name}'.`,
+              { ...opts },
             );
           }
         }
@@ -670,10 +681,10 @@
       const S = String(V);
 
       if (!E.has(S)) {
-        throw makeException(
-          TypeError,
-          `The provided value '${V}' is not a valid enum value of type ${name}.`,
-          opts,
+        throw new TypeError(
+          `${
+            opts.prefix ? opts.prefix + ": " : ""
+          }The provided value '${S}' is not a valid enum value of type ${name}.`,
         );
       }
 
@@ -694,12 +705,106 @@
     };
   }
 
+  // https://heycam.github.io/webidl/#es-sequence
+  function createSequenceConverter(converter) {
+    return function (V, opts = {}) {
+      if (typeof V !== "object") {
+        throw makeException(
+          TypeError,
+          "can not be converted to sequence.",
+          opts,
+        );
+      }
+      const iter = V?.[Symbol.iterator]?.();
+      if (iter === undefined) {
+        throw makeException(
+          TypeError,
+          "can not be converted to sequence.",
+          opts,
+        );
+      }
+      const array = [];
+      while (true) {
+        const res = iter?.next?.();
+        if (res === undefined) {
+          throw makeException(
+            TypeError,
+            "can not be converted to sequence.",
+            opts,
+          );
+        }
+        if (res.done === true) break;
+        const val = converter(res.value, {
+          ...opts,
+          context: `${opts.context}, index ${array.length}`,
+        });
+        array.push(val);
+      }
+      return array;
+    };
+  }
+
+  function createRecordConverter(keyConverter, valueConverter) {
+    return (V, opts) => {
+      if (typeof V !== "object") {
+        throw makeException(
+          TypeError,
+          "can not be converted to dictionary.",
+          opts,
+        );
+      }
+      const result = {};
+      for (const key of V) {
+        const typedKey = keyConverter(key, opts);
+        const value = V[key];
+        const typedValue = valueConverter(value, opts);
+        result[typedKey] = typedValue;
+      }
+      return result;
+    };
+  }
+
+  const brand = Symbol("[[webidl.brand]]");
+
+  function createInterfaceConverter(name, prototype) {
+    return (V, opts) => {
+      if (!(V instanceof prototype) || V[brand] !== brand) {
+        throw makeException(TypeError, `is not of type ${name}.`, opts);
+      }
+      return V;
+    };
+  }
+
+  function createBranded(Type) {
+    const t = Object.create(Type.prototype);
+    t[brand] = brand;
+    return t;
+  }
+
+  function assertBranded(self, prototype) {
+    if (!(self instanceof prototype) || self[brand] !== brand) {
+      throw new TypeError("Illegal invocation");
+    }
+  }
+
+  function illegalConstructor() {
+    throw new TypeError("Illegal constructor");
+  }
+
   window.__bootstrap ??= {};
   window.__bootstrap.webidl = {
+    makeException,
     converters,
     requiredArguments,
     createDictionaryConverter,
     createEnumConverter,
     createNullableConverter,
+    createSequenceConverter,
+    createRecordConverter,
+    createInterfaceConverter,
+    brand,
+    createBranded,
+    assertBranded,
+    illegalConstructor,
   };
 })(this);

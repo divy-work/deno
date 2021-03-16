@@ -278,10 +278,13 @@ fn print_cache_info(
 
 pub fn get_types(unstable: bool) -> String {
   let mut types = format!(
-    "{}\n{}\n{}\n{}\n{}\n{}",
+    "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
     crate::tsc::DENO_NS_LIB,
+    crate::tsc::DENO_CONSOLE_LIB,
+    crate::tsc::DENO_URL_LIB,
     crate::tsc::DENO_WEB_LIB,
     crate::tsc::DENO_FETCH_LIB,
+    crate::tsc::DENO_WEBGPU_LIB,
     crate::tsc::DENO_WEBSOCKET_LIB,
     crate::tsc::SHARED_GLOBALS_LIB,
     crate::tsc::WINDOW_LIB,
@@ -343,7 +346,7 @@ async fn compile_command(
 
   // Select base binary based on `target` and `lite` arguments
   let original_binary =
-    tools::standalone::get_base_binary(deno_dir, target, lite).await?;
+    tools::standalone::get_base_binary(deno_dir, target.clone(), lite).await?;
 
   let final_bin = tools::standalone::create_standalone_binary(
     original_binary,
@@ -353,7 +356,8 @@ async fn compile_command(
 
   info!("{} {}", colors::green("Emit"), output.display());
 
-  tools::standalone::write_standalone_binary(output.clone(), final_bin).await?;
+  tools::standalone::write_standalone_binary(output.clone(), target, final_bin)
+    .await?;
 
   Ok(())
 }
@@ -385,11 +389,11 @@ async fn info_command(
     let info = graph.info()?;
 
     if json {
-      write_json_to_stdout(&json!(info))?;
+      write_json_to_stdout(&json!(info))
     } else {
-      write_to_stdout_ignore_sigpipe(info.to_string().as_bytes())?;
+      write_to_stdout_ignore_sigpipe(info.to_string().as_bytes())
+        .map_err(|err| err.into())
     }
-    Ok(())
   } else {
     // If it was just "deno info" print location of caches and exit
     print_cache_info(&program_state, json)
@@ -417,7 +421,7 @@ async fn install_command(
   tools::installer::install(flags, &module_url, args, name, root, force)
 }
 
-async fn language_server_command() -> Result<(), AnyError> {
+async fn lsp_command() -> Result<(), AnyError> {
   lsp::start().await
 }
 
@@ -875,7 +879,7 @@ async fn coverage_command(
   lcov: bool,
 ) -> Result<(), AnyError> {
   if !flags.unstable {
-    exit_unstable("compile");
+    exit_unstable("coverage");
   }
 
   if files.is_empty() {
@@ -1022,6 +1026,8 @@ fn init_logger(maybe_level: Option<Level>) {
   )
   // https://github.com/denoland/deno/issues/6641
   .filter_module("rustyline", LevelFilter::Off)
+  // wgpu backend crates (gfx_backend), have a lot of useless INFO and WARN logs
+  .filter_module("gfx", LevelFilter::Error)
   .format(|buf, record| {
     let mut target = record.target().to_string();
     if let Some(line_no) = record.line() {
@@ -1099,7 +1105,7 @@ fn get_subcommand(
     } => {
       install_command(flags, module_url, args, name, root, force).boxed_local()
     }
-    DenoSubcommand::LanguageServer => language_server_command().boxed_local(),
+    DenoSubcommand::Lsp => lsp_command().boxed_local(),
     DenoSubcommand::Lint {
       files,
       rules,
