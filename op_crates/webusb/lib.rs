@@ -1,6 +1,6 @@
 // Copyright 2018-2021 the Deno authors. All rights reserved. MIT license.
 
-// #![deny(warnings)]
+#![deny(warnings)]
 
 use deno_core::error::bad_resource_id;
 use deno_core::error::AnyError;
@@ -41,11 +41,11 @@ pub fn init(isolate: &mut JsRuntime) {
   }
 }
 
-#[derive(Serialize, Copy, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UsbConfiguration {
   // Index of String Descriptor describing this configuration.
-  configuration_name: Option<u8>,
+  configuration_name: Option<String>,
   // The configuration number. Should corresspond to bConfigurationValue (https://www.beyondlogic.org/usbnutshell/usb5.shtml#ConfigurationDescriptors)
   configuration_value: u8,
   // TODO: implement USBInterfaces
@@ -894,16 +894,33 @@ pub async fn op_webusb_get_devices(
     let config_descriptor = device.active_config_descriptor();
     let device_version = device_descriptor.device_version();
     let usb_version = device_descriptor.usb_version();
+    let handle = device.open()?;
 
     let configuration = match config_descriptor {
       Ok(config_descriptor) => Some(UsbConfiguration {
-        configuration_name: config_descriptor.description_string_index(),
+        configuration_name: match config_descriptor.description_string_index() {
+          None => None,
+          Some(idx) => Some(handle.read_string_descriptor_ascii(idx)?),
+        },
         configuration_value: config_descriptor.number(),
       }),
       Err(_) => None,
     };
 
-    let handle = device.open()?;
+    let num_configurations = device_descriptor.num_configurations();
+    let mut configurations: Vec<UsbConfiguration> = vec![];
+    for idx in 0..num_configurations {
+      let curr_config_description = device.config_descriptor(idx)?;
+      let config_name = match curr_config_description.description_string_index()
+      {
+        None => None,
+        Some(idx) => Some(handle.read_string_descriptor_ascii(idx)?),
+      };
+      configurations.push(UsbConfiguration {
+        configuration_name: config_name,
+        configuration_value: curr_config_description.number(),
+      });
+    }
     let manufacturer_name = handle_err_to_none!(
       handle.read_manufacturer_string_ascii(&device_descriptor)
     );
@@ -913,7 +930,7 @@ pub async fn op_webusb_get_devices(
       handle.read_serial_number_string_ascii(&device_descriptor)
     );
     let usbdevice = UsbDevice {
-      configurations: vec![],
+      configurations,
       configuration,
       device_class,
       device_subclass: device_descriptor.sub_class_code(),

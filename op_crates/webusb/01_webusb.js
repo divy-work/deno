@@ -4,11 +4,31 @@
 ((window) => {
   const core = window.Deno.core;
 
+  class UsbConfiguration {
+    #name;
+    #value;
+    constructor({ configurationValue, configurationName }) {
+      this.#name = configurationName;
+      this.#value = configurationValue;
+    }
+
+    get configurationName() {
+      return this.#name;
+    }
+
+    get configurationValue() {
+      return this.#value;
+    }
+  }
+
   class UsbDevice {
     #rid;
     #deviceHandleRid;
     constructor(device, rid) {
-      this.device = device;
+      Object.assign(this, device);
+      this.configurations = device.configurations.map((config) =>
+        new UsbConfiguration(config)
+      );
       this.#rid = rid;
       this.opened = false;
     }
