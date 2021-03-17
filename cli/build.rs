@@ -15,6 +15,8 @@ use deno_runtime::deno_url;
 use deno_runtime::deno_web;
 use deno_runtime::deno_webgpu;
 use deno_runtime::deno_websocket;
+use deno_runtime::deno_webusb;
+
 use regex::Regex;
 use std::collections::HashMap;
 use std::env;
@@ -70,6 +72,7 @@ fn create_compiler_snapshot(
   op_crate_libs.insert("deno.webgpu", deno_webgpu::get_declaration());
   op_crate_libs.insert("deno.websocket", deno_websocket::get_declaration());
   op_crate_libs.insert("deno.crypto", deno_crypto::get_declaration());
+  op_crate_libs.insert("deno.webusb", deno_webusb::get_declaration());
 
   // ensure we invalidate the build properly.
   for (_, path) in op_crate_libs.iter() {

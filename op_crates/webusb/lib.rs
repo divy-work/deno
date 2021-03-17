@@ -957,3 +957,7 @@ pub async fn op_webusb_get_devices(
 
   Ok(json!(usbdevices))
 }
+
+pub fn get_declaration() -> PathBuf {
+  PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lib.deno_webusb.d.ts")
+}
