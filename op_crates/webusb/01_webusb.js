@@ -156,10 +156,12 @@
   window.usb = {
     getDevices,
     UsbDevice,
+    UsbConfiguration,
   };
   window.__bootstrap = window.__bootstrap || {};
   window.__bootstrap.usb = {
     getDevices,
     UsbDevice,
+    UsbConfiguration,
   };
 })(this);
